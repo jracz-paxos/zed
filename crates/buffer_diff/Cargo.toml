@@ -13,7 +13,7 @@ path = "src/buffer_diff.rs"
 doctest = false
 
 [features]
-test-support = ["settings", "dep:pretty_assertions"]
+test-support = ["dep:pretty_assertions"]
 
 [dependencies]
 clock.workspace = true
@@ -23,7 +23,7 @@ language.workspace = true
 log.workspace = true
 pretty_assertions = { workspace = true, optional = true }
 rope.workspace = true
-settings = { workspace = true, optional = true }
+settings.workspace = true
 sum_tree.workspace = true
 text.workspace = true
 tracing.workspace = true
@@ -35,8 +35,7 @@ ctor.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 pretty_assertions.workspace = true
 rand.workspace = true
-
-settings.workspace = true
+settings = { workspace = true, features = ["test-support"] }
 text = { workspace = true, features = ["test-support"] }
 unindent.workspace = true
 zlog.workspace = true

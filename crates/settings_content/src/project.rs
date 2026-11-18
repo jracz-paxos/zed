@@ -683,6 +683,13 @@ pub struct GitSettings {
     ///
     /// Default: true
     pub show_stage_restore_buttons: Option<bool>,
+    /// Whether diff views hide changes that only add, remove, or change
+    /// whitespace (like `git diff -w`). Only affects what diff views display:
+    /// the editor gutter keeps showing every change, and staging, restoring,
+    /// and committing always include whitespace changes.
+    ///
+    /// Default: false
+    pub ignore_whitespace: Option<bool>,
     /// Directory where git worktrees are created, relative to the repository
     /// working directory.
     ///

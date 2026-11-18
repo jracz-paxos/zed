@@ -17,7 +17,8 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use askpass::{AskPassDelegate, EncryptedPassword, IKnowWhatIAmDoingAndIHaveReadTheDocs};
 use async_lock::Semaphore;
 use buffer_diff::{
-    BufferDiff, DiffHunk, DiffHunkSecondaryStatus, DiffOperations, PendingHunk, PendingSense,
+    BufferDiff, BufferDiffSettings, DiffHunk, DiffHunkSecondaryStatus, DiffOperations, PendingHunk,
+    PendingSense,
 };
 use client::ProjectId;
 use collections::HashMap;
@@ -109,6 +110,7 @@ pub struct GitStore {
     repositories: HashMap<RepositoryId, Entity<Repository>>,
     parked_repositories: Vec<ParkedRepository>,
     diff_base: GitDiffBaseSetting,
+    buffer_diff_settings: BufferDiffSettings,
     display_diffs: HashMap<RepositoryId, DisplayDiff>,
     worktree_ids: HashMap<RepositoryId, HashSet<WorktreeId>>,
     active_repo_id: Option<RepositoryId>,
@@ -1187,10 +1189,16 @@ impl GitStore {
             if setting != this.diff_base {
                 this.set_diff_base(setting, cx);
             }
+            let buffer_diff_settings = BufferDiffSettings::get_global(cx);
+            if *buffer_diff_settings != this.buffer_diff_settings {
+                this.buffer_diff_settings = buffer_diff_settings.clone();
+                this.recalculate_all_diffs(cx);
+            }
             this.activate_parked_repositories_where_parking_disabled(cx);
         }));
 
         let diff_base_setting = ProjectSettings::get_global(cx).git.diff_base;
+        let buffer_diff_settings = BufferDiffSettings::get_global(cx).clone();
         GitStore {
             state,
             project: None,
@@ -1199,6 +1207,7 @@ impl GitStore {
             repositories: HashMap::default(),
             parked_repositories: Vec::new(),
             diff_base: diff_base_setting,
+            buffer_diff_settings,
             display_diffs: HashMap::default(),
             worktree_ids: HashMap::default(),
             active_repo_id: None,
@@ -5140,6 +5149,18 @@ impl GitStore {
 
     pub fn diff_base(&self) -> GitDiffBaseSetting {
         self.diff_base
+    }
+
+    fn recalculate_all_diffs(&mut self, cx: &mut Context<Self>) {
+        for (buffer_id, diff_state) in &self.diffs {
+            let Some(buffer) = self.buffer_store.read(cx).get(*buffer_id) else {
+                continue;
+            };
+            let buffer_snapshot = buffer.read(cx).text_snapshot();
+            diff_state.update(cx, |diff_state, cx| {
+                diff_state.recalculate_diffs(buffer_snapshot, cx);
+            });
+        }
     }
 
     fn set_diff_base(&mut self, setting: GitDiffBaseSetting, cx: &mut Context<Self>) {

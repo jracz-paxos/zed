@@ -933,6 +933,19 @@ See [Diff View Styles](../git.md#diff-view-styles).
 
 See [Word Diff Highlighting](../git.md#word-diff-highlighting).
 
+## Word Diff Granularity {#word-diff-granularity}
+
+- Description: How finely word diff highlighting marks changes within modified lines.
+- Setting: `word_diff_granularity`
+- Default: `"word"`
+
+**Options**
+
+1. `"word"`: Highlight whole changed words.
+2. `"character"`: Highlight only the changed characters.
+
+See [Word Diff Highlighting](../git.md#word-diff-highlighting).
+
 ## Disable AI
 
 - Description: Whether to disable all AI features in Zed
@@ -3186,6 +3199,7 @@ These settings belong inside the `git` object.
 | `file_diff.show_full_file`   | `true`              | Show the full file when opening a file diff, rather than changes only. |
 | `path_style`                 | `"file_name_first"` | Use `"file_name_first"` or `"file_path_first"` in Git views.           |
 | `show_stage_restore_buttons` | `true`              | Show stage and restore buttons on diff hunks.                          |
+| `ignore_whitespace`          | `false`             | Hide whitespace-only changes in diff views.                            |
 
 ### Git Dates
 

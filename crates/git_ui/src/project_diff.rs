@@ -2314,6 +2314,80 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn test_ignore_whitespace_folds_whitespace_only_files(cx: &mut TestAppContext) {
+        init_test(cx);
+        let set_ignore_whitespace = |ignore_whitespace: bool, cx: &mut VisualTestContext| {
+            cx.update(|_, cx| {
+                cx.update_global::<SettingsStore, _>(|store, cx| {
+                    store.update_user_settings(cx, |settings| {
+                        settings.git.get_or_insert_default().ignore_whitespace =
+                            Some(ignore_whitespace);
+                    });
+                });
+            });
+        };
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/project"),
+            json!({
+                ".git": {},
+                "real.rs": "fn real() {\n    changed();\n}\n",
+                "whitespace.rs": "fn whitespace() {\n        indented();\n}\n",
+            }),
+        )
+        .await;
+        fs.set_head_and_index_for_repo(
+            path!("/project/.git").as_ref(),
+            &[
+                ("real.rs", "fn real() {\n    original();\n}\n".into()),
+                (
+                    "whitespace.rs",
+                    "fn whitespace() {\n    indented();\n}\n".into(),
+                ),
+            ],
+        );
+        let project = Project::test(fs.clone(), [path!("/project").as_ref()], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+        set_ignore_whitespace(true, cx);
+        let diff = cx.new_window_entity(|window, cx| {
+            ProjectDiff::new(project.clone(), workspace, window, cx)
+        });
+        cx.run_until_parked();
+
+        let folded_paths = |cx: &mut VisualTestContext| {
+            diff.read_with(cx, |diff, cx| {
+                let editor = diff.editor(cx).read(cx).rhs_editor().read(cx);
+                let multibuffer = editor.buffer().read(cx);
+                let mut paths = editor
+                    .folded_buffers(cx)
+                    .iter()
+                    .filter_map(|buffer_id| multibuffer.buffer(*buffer_id))
+                    .filter_map(|buffer| {
+                        Some(buffer.read(cx).file()?.path().as_unix_str().to_string())
+                    })
+                    .collect::<Vec<_>>();
+                paths.sort();
+                paths
+            })
+        };
+
+        let paths = diff.read_with(cx, |diff, cx| diff.excerpt_file_paths(cx));
+        assert_eq!(paths, vec!["real.rs", "whitespace.rs"]);
+        assert_eq!(folded_paths(cx), vec!["whitespace.rs"]);
+
+        set_ignore_whitespace(false, cx);
+        cx.run_until_parked();
+        assert_eq!(folded_paths(cx), Vec::<String>::new());
+
+        set_ignore_whitespace(true, cx);
+        cx.run_until_parked();
+        assert_eq!(folded_paths(cx), vec!["whitespace.rs"]);
+    }
+
+    #[gpui::test]
     async fn test_excerpts_splitting_after_restoring_the_middle_excerpt(cx: &mut TestAppContext) {
         init_test(cx);
 

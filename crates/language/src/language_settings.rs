@@ -20,7 +20,8 @@ pub use settings::{
     EditPredictionDataCollectionChoice, EditPredictionPromptFormatContent, EditPredictionProvider,
     EditPredictionsMode, FormatOnSave, Formatter, FormatterList, InlayHintKind,
     LanguageSettingsContent, LineEndingSetting, LspInsertMode, REST_OF_LANGUAGE_SERVERS,
-    RewrapBehavior, ShowWhitespaceSetting, SoftWrap, SoftWrapIndent, WordsCompletionMode,
+    RewrapBehavior, ShowWhitespaceSetting, SoftWrap, SoftWrapIndent, WordDiffGranularity,
+    WordsCompletionMode,
 };
 use settings::{RegisterSetting, Settings, SettingsLocation, SettingsStore, merge_from::MergeFrom};
 use shellexpand;
@@ -181,6 +182,10 @@ pub struct LanguageSettings {
     ///
     /// Default: `true`
     pub word_diff_enabled: bool,
+    /// How finely word diff highlighting marks changes within modified lines.
+    ///
+    /// Default: `word`
+    pub word_diff_granularity: WordDiffGranularity,
     /// Whether to use tree-sitter bracket queries to detect and colorize the brackets in the editor.
     pub colorize_brackets: bool,
 }
@@ -923,6 +928,7 @@ impl settings::Settings for AllLanguageSettings {
                 },
                 debuggers: settings.debuggers.unwrap(),
                 word_diff_enabled: settings.word_diff_enabled.unwrap(),
+                word_diff_granularity: settings.word_diff_granularity.unwrap_or_default(),
             }
         }
 

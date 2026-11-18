@@ -83,6 +83,32 @@ To disable word diff for specific languages only, add this to your settings.json
 }
 ```
 
+To highlight only the changed characters instead of whole words (for example, only `Full` in `userName` → `userFullName`), set `word_diff_granularity`:
+
+```json
+{
+  "word_diff_granularity": "character"
+}
+```
+
+### Ignoring Whitespace Changes
+
+Reformatting, re-indenting, or realigning code can make a diff show many changed lines whose only difference is whitespace. To hide those changes in diff views, click the **Hide Whitespace Changes** button in the diff view's toolbar, run {#action editor::ToggleDiffIgnoreWhitespace}, or add this to your `settings.json`:
+
+```json
+{
+  "git": {
+    "ignore_whitespace": true
+  }
+}
+```
+
+Lines that differ only in whitespace are then shown as unchanged, like `git diff -w`. This only changes what diff views display:
+
+- The editor gutter keeps marking every changed line.
+- Staging, unstaging, or restoring a hunk includes the whitespace changes around it, so what you commit always matches the file on disk.
+- A whitespace-only change that isn't next to any other change is hidden from diff views, but is still staged by **Stage All** or by staging the file.
+
 ### Diff View Styles
 
 Zed displays diffs in two modes: **split** (side-by-side comparison) or **unified** (inline changes). Split view is the default.

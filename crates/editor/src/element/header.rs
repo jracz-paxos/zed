@@ -659,6 +659,12 @@ pub(crate) fn render_buffer_header(
         .flatten()
         .map(|diff| diff.changed_row_counts())
         .filter(|(added, removed)| *added > 0 || *removed > 0);
+    let whitespace_changes_only = diff_stat.is_none()
+        && multi_buffer.all_diff_hunks_expanded()
+        && multi_buffer.ignores_whitespace_in_diffs()
+        && multi_buffer
+            .diff_for(buffer_id)
+            .is_some_and(|diff| diff.read(cx).changed_row_counts() != (0, 0));
     let indicator = multi_buffer.buffer(buffer_id).and_then(|buffer| {
         let buffer = buffer.read(cx);
         let indicator_color = match (buffer.has_conflict(), buffer.is_dirty()) {
@@ -926,6 +932,13 @@ pub(crate) fn render_buffer_header(
                         .child(
                             h_flex()
                                 .gap_2()
+                                .when(whitespace_changes_only, |this| {
+                                    this.child(
+                                        Label::new("Whitespace changes only")
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
+                                    )
+                                })
                                 .when_some(diff_stat, |this, (added, removed)| {
                                     let ui_font_size =
                                         theme_settings::ThemeSettings::get_global(cx)

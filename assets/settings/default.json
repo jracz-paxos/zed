@@ -1731,6 +1731,16 @@
   //
   // Default: true
   "word_diff_enabled": true,
+  // How finely word diff highlighting marks changes within modified lines,
+  // when `word_diff_enabled` is true.
+  //
+  // 1. Highlight whole changed words:
+  //    "word_diff_granularity": "word"
+  // 2. Highlight only the changed characters:
+  //    "word_diff_granularity": "character"
+  //
+  // Default: word
+  "word_diff_granularity": "word",
   // Control what info is collected by Zed.
   "telemetry": {
     // Send debug info like crash reports.
@@ -1924,6 +1934,11 @@
     "path_style": "file_name_first",
     // Whether to show the stage and restore buttons on diff hunks.
     "show_stage_restore_buttons": true,
+    // Whether diff views hide whitespace-only changes (like `git diff -w`).
+    // Only affects what diff views display: the editor gutter keeps showing
+    // every change, and staging, restoring, and committing always include
+    // whitespace changes.
+    "ignore_whitespace": false,
     // Directory where git worktrees are created, relative to the repository
     // working directory.
     //

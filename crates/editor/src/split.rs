@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use buffer_diff::{BufferDiff, BufferDiffSnapshot, DiffHunkStatus};
+use buffer_diff::{BufferDiff, BufferDiffSettings, BufferDiffSnapshot, DiffHunkStatus};
 use collections::HashMap;
 
 use fs::Fs;
@@ -122,7 +122,7 @@ fn translate_lhs_selections_to_rhs(
             continue;
         };
 
-        let diff_snapshot = diff.read(cx).snapshot(cx);
+        let diff_snapshot = splittable.displayed_diff_snapshot(&diff, cx);
         let rhs_buffer_snapshot = rhs_buffer.read(cx).snapshot();
         let base_text_buffer = diff.read(cx).base_text_buffer();
         let base_text_snapshot = base_text_buffer.read(cx).snapshot();
@@ -413,6 +413,18 @@ fn patch_for_excerpt(
 #[action(namespace = editor)]
 pub struct ToggleSplitDiff;
 
+/// Toggles whether diff views hide whitespace-only changes.
+#[derive(Clone, Copy, PartialEq, Eq, Action, Default)]
+#[action(namespace = editor)]
+pub struct ToggleDiffIgnoreWhitespace;
+
+fn toggle_diff_ignore_whitespace(cx: &mut App) {
+    let ignore_whitespace = !BufferDiffSettings::get_global(cx).ignore_whitespace;
+    update_settings_file(<dyn Fs>::global(cx), cx, move |settings, _| {
+        settings.git.get_or_insert_default().ignore_whitespace = Some(ignore_whitespace);
+    });
+}
+
 /// Unified/split diff view toggle buttons, shared by the toolbars of every
 /// diff view (project diff, branch diff, solo diff) so they can't drift apart.
 #[derive(gpui::IntoElement)]
@@ -445,6 +457,7 @@ impl DiffStyleControls {
 
 impl RenderOnce for DiffStyleControls {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl gpui::IntoElement {
+        let ignore_whitespace = BufferDiffSettings::get_global(cx).ignore_whitespace;
         let editor = self.splittable_editor.read(cx);
         let diff_view_style = editor.diff_view_style();
         let is_split_set = diff_view_style == DiffViewStyle::Split;
@@ -528,6 +541,20 @@ impl RenderOnce for DiffStyleControls {
                         }
                     }),
             )
+            .child(
+                IconButton::new("diff-ignore-whitespace", IconName::Space)
+                    .icon_size(IconSize::Small)
+                    .toggle_state(ignore_whitespace)
+                    .tooltip(Tooltip::for_action_title(
+                        if ignore_whitespace {
+                            "Show Whitespace Changes"
+                        } else {
+                            "Hide Whitespace Changes"
+                        },
+                        &ToggleDiffIgnoreWhitespace,
+                    ))
+                    .on_click(|_, _window, cx| toggle_diff_ignore_whitespace(cx)),
+            )
     }
 }
 
@@ -576,6 +603,22 @@ impl SplittableEditor {
 
     pub fn diff_view_style(&self) -> DiffViewStyle {
         self.diff_view_style
+    }
+
+    fn set_ignore_whitespace(&mut self, ignore_whitespace: bool, cx: &mut Context<Self>) {
+        self.rhs_multibuffer.update(cx, |multibuffer, cx| {
+            multibuffer.set_ignore_whitespace_in_diffs(ignore_whitespace, cx);
+        });
+        if let Some(lhs) = &self.lhs {
+            lhs.multibuffer.update(cx, |multibuffer, cx| {
+                multibuffer.set_ignore_whitespace_in_diffs(ignore_whitespace, cx);
+            });
+        }
+    }
+
+    fn displayed_diff_snapshot(&self, diff: &Entity<BufferDiff>, cx: &App) -> BufferDiffSnapshot {
+        let ignore_whitespace = self.rhs_multibuffer.read(cx).ignores_whitespace_in_diffs();
+        diff.read(cx).snapshot_for_display(ignore_whitespace, cx)
     }
 
     pub fn is_split(&self) -> bool {
@@ -662,6 +705,8 @@ impl SplittableEditor {
                     this.toggle_split(&ToggleSplitDiff, window, cx);
                     cx.notify();
                 }
+                let ignore_whitespace = BufferDiffSettings::get_global(cx).ignore_whitespace;
+                this.set_ignore_whitespace(ignore_whitespace, cx);
             }),
             // Either editor can outlive this one and the other editor. A scroll anchor set by the
             // other side can't be converted once that side's display map is released.
@@ -671,6 +716,12 @@ impl SplittableEditor {
                 }
             }),
         ];
+        rhs_multibuffer.update(cx, |rhs_multibuffer, cx| {
+            rhs_multibuffer.set_ignore_whitespace_in_diffs(
+                BufferDiffSettings::get_global(cx).ignore_whitespace,
+                cx,
+            );
+        });
 
         let this = cx.weak_entity();
         window.defer(cx, {
@@ -723,6 +774,7 @@ impl SplittableEditor {
         }
 
         let rhs_has_headers = self.rhs_multibuffer.read(cx).snapshot(cx).show_headers();
+        let ignore_whitespace = self.rhs_multibuffer.read(cx).ignores_whitespace_in_diffs();
         let lhs_multibuffer = cx.new(|cx| {
             let mut multibuffer = if !rhs_has_headers {
                 MultiBuffer::without_headers(Capability::ReadOnly)
@@ -730,6 +782,7 @@ impl SplittableEditor {
                 MultiBuffer::new(Capability::ReadOnly)
             };
             multibuffer.set_all_diff_hunks_expanded(cx);
+            multibuffer.set_ignore_whitespace_in_diffs(ignore_whitespace, cx);
             multibuffer
         });
 
@@ -1340,7 +1393,9 @@ impl SplittableEditor {
                 let main_buffer_snapshot = main_buffer.read(cx).snapshot();
 
                 let base_text_buffer = diff.read(cx).base_text_buffer().clone();
-                let diff_snapshot = diff.read(cx).snapshot(cx);
+                let diff_snapshot = diff
+                    .read(cx)
+                    .snapshot_for_display(rhs_multibuffer.ignores_whitespace_in_diffs(), cx);
                 let base_text_buffer_snapshot = base_text_buffer.read(cx).snapshot();
 
                 let mut paired_ranges: Vec<(Range<Point>, ExcerptRange<text::Anchor>)> = Vec::new();
@@ -1940,7 +1995,7 @@ impl SplittableEditor {
             );
 
             if quiesced {
-                let diff_snapshot = diff.read(cx).snapshot(cx);
+                let diff_snapshot = self.displayed_diff_snapshot(&diff, cx);
                 let lhs_buffer_snapshot = lhs_snapshot
                     .buffer_for_id(lhs_excerpt.context.start.buffer_id)
                     .unwrap();
@@ -2316,6 +2371,9 @@ impl Render for SplittableEditor {
         div()
             .id("splittable-editor")
             .on_action(cx.listener(Self::toggle_split))
+            .on_action(|_: &ToggleDiffIgnoreWhitespace, _window, cx| {
+                toggle_diff_ignore_whitespace(cx)
+            })
             .on_action(cx.listener(Self::activate_pane_left))
             .on_action(cx.listener(Self::activate_pane_right))
             .on_action(cx.listener(Self::intercept_toggle_breakpoint))

@@ -668,6 +668,7 @@ impl VsCodeSettings {
                         .collect()
                 }),
             word_diff_enabled: None,
+            word_diff_granularity: None,
         }
     }
 

@@ -422,6 +422,30 @@ pub enum EditPredictionsMode {
     Eager,
 }
 
+/// How finely word diff highlighting marks changes within modified lines.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WordDiffGranularity {
+    /// Highlight whole changed words.
+    #[default]
+    Word,
+    /// Highlight only the changed characters.
+    Character,
+}
+
 /// Controls the soft-wrapping behavior in the editor.
 #[derive(
     Copy,
@@ -822,6 +846,11 @@ pub struct LanguageSettingsContent {
     ///
     /// Default: true
     pub word_diff_enabled: Option<bool>,
+    /// How finely word diff highlighting marks changes within modified lines,
+    /// when `word_diff_enabled` is true.
+    ///
+    /// Default: word
+    pub word_diff_granularity: Option<WordDiffGranularity>,
     /// Whether to use tree-sitter bracket queries to detect and colorize the brackets in the editor.
     ///
     /// Default: false

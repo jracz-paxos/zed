@@ -4954,6 +4954,93 @@ async fn test_word_diff_modified_lines_with_deletion_between(cx: &mut TestAppCon
 }
 
 #[gpui::test]
+async fn test_word_diff_character_granularity(cx: &mut TestAppContext) {
+    let settings_store = cx.update(|cx| {
+        let mut settings_store = SettingsStore::test(cx);
+        settings_store.update_user_settings(cx, |settings| {
+            settings
+                .project
+                .all_languages
+                .defaults
+                .word_diff_granularity = Some(settings::WordDiffGranularity::Character);
+        });
+        settings_store
+    });
+    cx.set_global(settings_store);
+
+    let base_text = "userName string\n";
+    let modified_text = "userFullName string\n";
+
+    let word_diffs = collect_word_diffs(base_text, modified_text, cx);
+
+    assert_eq!(word_diffs, vec!["Full"]);
+}
+
+#[gpui::test]
+async fn test_ignore_whitespace_in_diffs(cx: &mut TestAppContext) {
+    let settings_store = cx.update(|cx| {
+        let mut settings_store = SettingsStore::test(cx);
+        settings_store.update_user_settings(cx, |settings| {
+            settings.git.get_or_insert_default().ignore_whitespace = Some(true);
+        });
+        settings_store
+    });
+    cx.set_global(settings_store);
+
+    let base_text = "one\na = 1\nthree\n";
+    let modified_text = "one\na    = 1\nbbbb = 2\nthree\n";
+    let buffer = cx.new(|cx| Buffer::local(modified_text, cx));
+    let diff = cx
+        .new(|cx| BufferDiff::new_with_base_text(base_text, &buffer.read(cx).text_snapshot(), cx));
+    cx.run_until_parked();
+    let multibuffer = cx.new(|cx| {
+        let mut multibuffer = MultiBuffer::singleton(buffer.clone(), cx);
+        multibuffer.add_diff(diff.clone(), cx);
+        multibuffer
+    });
+
+    let hunks = |cx: &mut TestAppContext| {
+        multibuffer.read_with(cx, |multibuffer, cx| {
+            multibuffer
+                .snapshot(cx)
+                .diff_hunks()
+                .map(|hunk| {
+                    (
+                        hunk.row_range.start.0..hunk.row_range.end.0,
+                        hunk.status.kind,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+
+    assert_eq!(hunks(cx), vec![(1..3, DiffHunkStatusKind::Modified)]);
+
+    multibuffer.update(cx, |multibuffer, cx| {
+        multibuffer.set_ignore_whitespace_in_diffs(true, cx);
+    });
+    assert_eq!(hunks(cx), vec![(2..3, DiffHunkStatusKind::Added)]);
+
+    buffer.update(cx, |buffer, cx| buffer.edit([(0..3, "ONE")], None, cx));
+    diff.update(cx, |diff, cx| {
+        diff.recalculate_diff_sync(&buffer.read(cx).text_snapshot(), cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        hunks(cx),
+        vec![
+            (0..1, DiffHunkStatusKind::Modified),
+            (2..3, DiffHunkStatusKind::Added)
+        ]
+    );
+
+    multibuffer.update(cx, |multibuffer, cx| {
+        multibuffer.set_ignore_whitespace_in_diffs(false, cx);
+    });
+    assert_eq!(hunks(cx), vec![(0..3, DiffHunkStatusKind::Modified)]);
+}
+
+#[gpui::test]
 async fn test_word_diff_disabled(cx: &mut TestAppContext) {
     let settings_store = cx.update(|cx| {
         let mut settings_store = SettingsStore::test(cx);

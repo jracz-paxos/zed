@@ -1,4 +1,7 @@
-use crate::{CharClassifier, CharKind, CharScopeContext, LanguageScope};
+use crate::{
+    CharClassifier, CharKind, CharScopeContext, LanguageScope,
+    language_settings::WordDiffGranularity,
+};
 use anyhow::{Context, anyhow};
 use imara_diff::{Algorithm, Diff, InternedInput, Interner, Token, sources::lines};
 use std::{fmt::Write, iter, ops::Range, sync::Arc};
@@ -184,8 +187,16 @@ pub fn word_diff_ranges(
     options: DiffOptions,
 ) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
     let mut input: InternedInput<&str> = InternedInput::default();
-    input.update_before(tokenize(old_text, options.language_scope.clone()));
-    input.update_after(tokenize(new_text, options.language_scope));
+    match options.granularity {
+        WordDiffGranularity::Word => {
+            input.update_before(tokenize(old_text, options.language_scope.clone()));
+            input.update_after(tokenize(new_text, options.language_scope));
+        }
+        WordDiffGranularity::Character => {
+            input.update_before(tokenize_chars(old_text));
+            input.update_after(tokenize_chars(new_text));
+        }
+    }
 
     let mut old_ranges: Vec<Range<usize>> = Vec::new();
     let mut new_ranges: Vec<Range<usize>> = Vec::new();
@@ -238,6 +249,7 @@ pub struct DiffOptions {
     pub language_scope: Option<LanguageScope>,
     pub max_word_diff_len: usize,
     pub max_word_diff_line_count: usize,
+    pub granularity: WordDiffGranularity,
 }
 
 impl Default for DiffOptions {
@@ -246,6 +258,7 @@ impl Default for DiffOptions {
             language_scope: Default::default(),
             max_word_diff_len: MAX_WORD_DIFF_LEN,
             max_word_diff_line_count: MAX_WORD_DIFF_LINE_COUNT,
+            granularity: WordDiffGranularity::default(),
         }
     }
 }
@@ -420,6 +433,28 @@ fn token_len(input: &InternedInput<&str>, tokens: &[Token]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_word_diff_ranges_granularity() {
+        let old_text = "userName string";
+        let new_text = "userFullName string";
+
+        let (old_ranges, new_ranges) = word_diff_ranges(old_text, new_text, DiffOptions::default());
+        assert_eq!(old_ranges, vec![0..8]);
+        assert_eq!(new_ranges, vec![0..12]);
+
+        let (old_ranges, new_ranges) = word_diff_ranges(
+            old_text,
+            new_text,
+            DiffOptions {
+                granularity: WordDiffGranularity::Character,
+                ..DiffOptions::default()
+            },
+        );
+        assert_eq!(old_ranges, Vec::<Range<usize>>::new());
+        assert_eq!(new_ranges, vec![4..8]);
+        assert_eq!(&new_text[4..8], "Full");
+    }
 
     #[test]
     fn test_tokenize() {

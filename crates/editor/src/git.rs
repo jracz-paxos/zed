@@ -5,7 +5,7 @@ use ::git::{
     Oid, Restore, blame::BlameEntry, commit::ParsedCommitMessage, repository::RepoPath,
     status::FileStatus,
 };
-use buffer_diff::{BufferDiff, DiffHunkStatus, DiffHunkStatusKind};
+use buffer_diff::{BufferDiff, BufferDiffSnapshot, DiffHunkStatus, DiffHunkStatusKind};
 use project::git_store::Repository;
 
 #[derive(Clone)]
@@ -289,13 +289,21 @@ impl Editor {
                 } else {
                     let diff_base_byte_range =
                         hunk.diff_base_byte_range.start.0..hunk.diff_base_byte_range.end.0;
-                    let Some(hunk) = diff_snapshot
-                        .hunks_intersecting_base_text_range(
-                            diff_base_byte_range.clone(),
-                            diff_snapshot.buffer_snapshot(),
-                        )
-                        .find(|hunk| hunk.diff_base_byte_range == diff_base_byte_range)
-                    else {
+                    let find_hunk = |diff_snapshot: &BufferDiffSnapshot| {
+                        diff_snapshot
+                            .hunks_intersecting_base_text_range(
+                                diff_base_byte_range.clone(),
+                                diff_snapshot.buffer_snapshot(),
+                            )
+                            .find(|hunk| hunk.diff_base_byte_range == diff_base_byte_range)
+                    };
+                    let hunk = find_hunk(&diff_snapshot).or_else(|| {
+                        diff_snapshot
+                            .has_whitespace_insensitive_hunks()
+                            .then(|| find_hunk(&diff_snapshot.ignoring_whitespace()))
+                            .flatten()
+                    });
+                    let Some(hunk) = hunk else {
                         continue;
                     };
                     let kind = if hunk.buffer_range.start == hunk.buffer_range.end {
@@ -926,21 +934,37 @@ impl Editor {
                 continue;
             };
             let diff_snapshot = hunks.diff.read(cx).snapshot(cx);
-            let changes = hunks
-                .hunks
+            let ranges = if diff_snapshot.has_whitespace_insensitive_hunks() {
+                let buffer_snapshot = buffer.read(cx).text_snapshot();
+                diff_snapshot
+                    .exact_hunks_containing(
+                        hunks.hunks.into_iter().map(|hunk| hunk.buffer_range),
+                        &buffer_snapshot,
+                    )
+                    .into_iter()
+                    .map(|hunk| (hunk.buffer_range, hunk.diff_base_byte_range))
+                    .collect::<Vec<_>>()
+            } else {
+                hunks
+                    .hunks
+                    .into_iter()
+                    .map(|hunk| (hunk.buffer_range, hunk.diff_base_byte_range))
+                    .collect()
+            };
+            let changes = ranges
                 .into_iter()
-                .filter_map(|hunk| {
-                    if hunk.diff_base_byte_range == (0..0)
-                        && hunk.buffer_range.start.is_min()
-                        && hunk.buffer_range.end.is_max()
+                .filter_map(|(buffer_range, diff_base_byte_range)| {
+                    if diff_base_byte_range == (0..0)
+                        && buffer_range.start.is_min()
+                        && buffer_range.end.is_max()
                     {
                         return None;
                     }
                     let original_text = diff_snapshot
                         .base_text()
                         .as_rope()
-                        .slice(hunk.diff_base_byte_range.start..hunk.diff_base_byte_range.end);
-                    Some((hunk.buffer_range, original_text))
+                        .slice(diff_base_byte_range.start..diff_base_byte_range.end);
+                    Some((buffer_range, original_text))
                 })
                 .collect::<Vec<_>>();
             if !changes.is_empty() {

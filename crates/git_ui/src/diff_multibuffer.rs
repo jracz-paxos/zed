@@ -4,7 +4,7 @@ use crate::{
     git_panel_settings::GitPanelSettings,
 };
 use anyhow::Result;
-use buffer_diff::BufferDiff;
+use buffer_diff::{BufferDiff, BufferDiffSnapshot};
 use collections::{HashMap, HashSet};
 use editor::{
     EditorEvent, EditorSettings, SelectionEffects, SplittableEditor, actions::GoToHunk,
@@ -54,6 +54,7 @@ pub struct DiffMultibuffer {
     branch_diff: Entity<diff_buffer_list::DiffBufferList>,
     editor: Entity<SplittableEditor>,
     buffer_subscriptions: HashMap<RepoPath, BufferSubscriptions>,
+    whitespace_only_folded_buffers: HashSet<BufferId>,
     workspace: WeakEntity<Workspace>,
     focus_handle: FocusHandle,
     pending_scroll: Option<PathKey>,
@@ -168,6 +169,7 @@ impl DiffMultibuffer {
             editor,
             multibuffer,
             buffer_subscriptions: Default::default(),
+            whitespace_only_folded_buffers: HashSet::default(),
             pending_scroll: None,
             review_comment_count: 0,
             empty_label: empty_label.into(),
@@ -508,14 +510,30 @@ impl DiffMultibuffer {
 
         let snapshot = display_buffer.read(cx).snapshot();
         let diff_snapshot = diff.read(cx).snapshot(cx);
-
-        let excerpt_ranges = {
-            let diff_hunk_ranges = diff_snapshot
+        let hunk_ranges = |diff_snapshot: &BufferDiffSnapshot| {
+            diff_snapshot
                 .hunks_intersecting_range(
                     Anchor::min_max_range_for_buffer(snapshot.remote_id()),
                     &snapshot,
                 )
-                .map(|diff_hunk| diff_hunk.buffer_range.to_point(&snapshot));
+                .map(|diff_hunk| diff_hunk.buffer_range.to_point(&snapshot))
+                .collect::<Vec<_>>()
+        };
+
+        let mut diff_hunk_ranges = if self.multibuffer.read(cx).ignores_whitespace_in_diffs() {
+            hunk_ranges(&diff_snapshot.ignoring_whitespace())
+        } else {
+            hunk_ranges(&diff_snapshot)
+        };
+        // Whitespace-only files keep a folded header so they aren't committed unseen.
+        let only_whitespace_changed = diff_hunk_ranges.is_empty()
+            && diff_snapshot.has_whitespace_insensitive_hunks()
+            && self.multibuffer.read(cx).ignores_whitespace_in_diffs();
+        if only_whitespace_changed {
+            diff_hunk_ranges = hunk_ranges(&diff_snapshot);
+        }
+
+        let excerpt_ranges = {
             let conflict_ranges = conflict_set.as_ref().and_then(|conflict_set| {
                 let conflicts = conflict_set.read(cx).snapshot();
                 let conflicts = conflicts
@@ -526,7 +544,7 @@ impl DiffMultibuffer {
                 (!conflicts.is_empty()).then_some(conflicts)
             });
 
-            conflict_ranges.unwrap_or_else(|| diff_hunk_ranges.collect())
+            conflict_ranges.unwrap_or(diff_hunk_ranges)
         };
 
         let buffer_id = snapshot.text.remote_id();
@@ -550,8 +568,19 @@ impl DiffMultibuffer {
             (was_empty, is_newly_added)
         });
 
+        // Only undo folds this view made, so a fold the user made stays put.
+        let fold_whitespace_only =
+            only_whitespace_changed && self.whitespace_only_folded_buffers.insert(buffer_id);
+        let unfold_whitespace_only =
+            !only_whitespace_changed && self.whitespace_only_folded_buffers.remove(&buffer_id);
+
         self.editor.update(cx, |editor, cx| {
             editor.rhs_editor().update(cx, |editor, cx| {
+                if fold_whitespace_only {
+                    editor.fold_buffer(buffer_id, cx);
+                } else if unfold_whitespace_only {
+                    editor.unfold_buffer(buffer_id, cx);
+                }
                 if was_empty {
                     editor.change_selections(
                         SelectionEffects::no_scroll(),

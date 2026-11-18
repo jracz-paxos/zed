@@ -517,10 +517,18 @@ struct DiffState {
 }
 
 impl DiffState {
-    fn snapshot(&self, buffer_id: BufferId, cx: &App) -> DiffStateSnapshot {
+    fn snapshot(
+        &self,
+        buffer_id: BufferId,
+        ignore_whitespace: bool,
+        cx: &App,
+    ) -> DiffStateSnapshot {
         DiffStateSnapshot {
             buffer_id,
-            diff: self.diff.read(cx).snapshot(cx),
+            diff: self
+                .diff
+                .read(cx)
+                .snapshot_for_display(ignore_whitespace, cx),
             main_buffer: self.main_buffer.as_ref().map(|b| b.read(cx).snapshot()),
         }
     }
@@ -779,6 +787,7 @@ pub struct MultiBufferSnapshot {
     all_diff_hunks_expanded: bool,
     show_deleted_hunks: bool,
     use_extended_diff_range: bool,
+    ignore_whitespace_in_diffs: bool,
     show_headers: bool,
 }
 
@@ -1945,6 +1954,7 @@ impl MultiBuffer {
             all_diff_hunks_expanded: _,
             show_deleted_hunks: _,
             use_extended_diff_range: _,
+            ignore_whitespace_in_diffs: _,
             show_headers: _,
             path_keys: _,
             buffers,
@@ -2135,7 +2145,7 @@ impl MultiBuffer {
         };
         let new_diff = DiffStateSnapshot {
             buffer_id,
-            diff: diff.snapshot(cx),
+            diff: diff.snapshot_for_display(snapshot.ignore_whitespace_in_diffs, cx),
             main_buffer: None,
         };
         let snapshot = self.snapshot.get_mut();
@@ -2184,7 +2194,7 @@ impl MultiBuffer {
         let diff = diff.read(cx);
         let new_diff = DiffStateSnapshot {
             buffer_id: base_text_buffer_id,
-            diff: diff.snapshot(cx),
+            diff: diff.snapshot_for_display(snapshot.ignore_whitespace_in_diffs, cx),
             main_buffer: Some(main_buffer_snapshot),
         };
         let snapshot = self.snapshot.get_mut();
@@ -2434,6 +2444,40 @@ impl MultiBuffer {
         });
     }
 
+    pub fn set_ignore_whitespace_in_diffs(
+        &mut self,
+        ignore_whitespace: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.snapshot.get_mut().ignore_whitespace_in_diffs == ignore_whitespace {
+            return;
+        }
+        self.snapshot.get_mut().ignore_whitespace_in_diffs = ignore_whitespace;
+
+        let diffs = self
+            .diffs
+            .values()
+            .map(|state| (state.diff.clone(), state.main_buffer.clone()))
+            .collect::<Vec<_>>();
+        for (diff, main_buffer) in diffs {
+            if let Some(main_buffer) = main_buffer {
+                let base_text_len = diff.read(cx).base_text(cx).len();
+                self.inverted_buffer_diff_changed(diff, main_buffer, Some(0..base_text_len), cx);
+            } else {
+                let buffer_id = diff.read(cx).buffer_id;
+                self.buffer_diff_changed(
+                    diff,
+                    Some(text::Anchor::min_max_range_for_buffer(buffer_id)),
+                    cx,
+                );
+            }
+        }
+    }
+
+    pub fn ignores_whitespace_in_diffs(&self) -> bool {
+        self.snapshot.borrow().ignore_whitespace_in_diffs
+    }
+
     pub fn set_use_extended_diff_range(&mut self, use_extended: bool, _cx: &mut Context<Self>) {
         self.snapshot.get_mut().use_extended_diff_range = use_extended;
     }
@@ -2630,6 +2674,7 @@ impl MultiBuffer {
             all_diff_hunks_expanded: _,
             show_deleted_hunks: _,
             use_extended_diff_range: _,
+            ignore_whitespace_in_diffs,
             show_headers: _,
         } = snapshot;
 
@@ -2652,7 +2697,11 @@ impl MultiBuffer {
                     if diffs_to_add.capacity() == 0 {
                         diffs_to_add.reserve(changed_buffer_ids.len());
                     }
-                    diffs_to_add.push(sum_tree::Edit::Insert(diff.snapshot(*id, cx)));
+                    diffs_to_add.push(sum_tree::Edit::Insert(diff.snapshot(
+                        *id,
+                        *ignore_whitespace_in_diffs,
+                        cx,
+                    )));
                 }
             }
             buffer_diff.edit(diffs_to_add, ());

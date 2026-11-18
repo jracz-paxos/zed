@@ -8822,7 +8822,7 @@ fn version_control_page() -> SettingsPage {
         ]
     }
 
-    fn git_hunks_section() -> [SettingsPageItem; 5] {
+    fn git_hunks_section() -> [SettingsPageItem; 6] {
         [
             SettingsPageItem::SectionHeader("Git Hunks"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -8885,6 +8885,25 @@ fn version_control_page() -> SettingsPage {
                             .git
                             .get_or_insert_default()
                             .show_stage_restore_buttons = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Ignore Whitespace",
+                description: "Whether diff views hide whitespace-only changes. Staging, restoring, and committing always include them.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("git.ignore_whitespace"),
+                    pick: |settings_content| {
+                        settings_content.git.as_ref()?.ignore_whitespace.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .git
+                            .get_or_insert_default()
+                            .ignore_whitespace = value;
                     },
                 }),
                 metadata: None,
@@ -10975,7 +10994,7 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
         ]
     }
 
-    fn miscellaneous_section() -> [SettingsPageItem; 8] {
+    fn miscellaneous_section() -> [SettingsPageItem; 9] {
         [
             SettingsPageItem::SectionHeader("Miscellaneous"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -11006,6 +11025,26 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
                     write: |settings_content, value, _| {
                         language_settings_field_mut(settings_content, value, |language, value| {
                             language.word_diff_enabled = value;
+                        })
+                    },
+                }),
+                metadata: None,
+                files: USER | PROJECT,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Word Diff Granularity",
+                description: "Whether word diff highlighting marks whole changed words or only the changed characters.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("languages.$(language).word_diff_granularity"),
+                    pick: |settings_content| {
+                        language_settings_field(settings_content, |language| {
+                            language.word_diff_granularity.as_ref()
+                        })
+                    },
+                    write: |settings_content, value, _| {
+                        language_settings_field_mut(settings_content, value, |language, value| {
+                            language.word_diff_granularity = value;
                         })
                     },
                 }),
